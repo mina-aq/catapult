@@ -125,12 +125,25 @@ func (proxy *replayingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	fixupRequestURL(req, proxy.scheme)
+
+	logf := makeLogger(req, proxy.quietMode)
+	logf(">>> HTTP Request: %s %s", req.Method, req.URL.String())
+	var requestHeaders []string
+	for name, values := range req.Header {
+		for _, value := range values {
+			requestHeaders = append(requestHeaders, fmt.Sprintf("  %s: %s", name, value))
+		}
+	}
+	if len(requestHeaders) > 0 {
+		logf("Request Headers:\n%s", strings.Join(requestHeaders, "\n"))
+	}
+
 	if err := processRequestURLParams(req, proxy.paramToIgnoreInURLPath); err != nil {
 		log.Printf("Error processing request URL: %v", err)
 		os.Exit(-1)
 		return
 	}
-	logf := makeLogger(req, proxy.quietMode)
+	
 
 	// Lookup the response in the archive.
 	_, storedResp, err := proxy.a.FindRequest(req)
@@ -182,6 +195,20 @@ func (proxy *replayingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	for k, v := range storedResp.Header {
 		w.Header()[k] = append([]string{}, v...)
 	}
+
+	logf("<<< HTTP Response: %d", storedResp.StatusCode)
+
+	var headerLines []string
+	for name, values := range storedResp.Header {
+		for _, value := range values {
+			headerLines = append(headerLines, fmt.Sprintf("  %s: %s", name, value))
+		}
+	}
+
+	if len(headerLines) > 0 {
+		logf("Headers:\n%s", strings.Join(headerLines, "\n"))
+	}
+
 	w.WriteHeader(storedResp.StatusCode)
 	if _, err := io.Copy(w, storedResp.Body); err != nil {
 		logf("warning: client response truncated: %v", err)
